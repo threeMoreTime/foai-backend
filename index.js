@@ -4,10 +4,26 @@ require('dotenv').config(); // 加载 .env 环境变量
 // 👉 新增：引入 chat 路由
 const userRouter = require('./routes/user');
 const chatRouter = require('./routes/chat');
+const getDB = require('./config/db');
 const authMiddleware = require('./middlewares/auth');
 const app = express();
 const PORT = process.env.PORT || 3000;
+const bootstrap = async () => {
+  try {
+    // 提前唤醒并初始化 SQLite 数据库
+    await getDB();
+    
+    app.listen(PORT, () => {
+      console.log(`🚀 FOAI Backend is running on http://localhost:${PORT}`);
+      console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+    });
+  } catch (error) {
+    console.error('❌ 服务启动失败:', error);
+    process.exit(1);
+  }
+};
 
+bootstrap();
 // 1. 全局中间件配置
 app.use(cors({
   origin: process.env.CORS_ORIGIN || '*'

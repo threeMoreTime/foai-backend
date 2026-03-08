@@ -2,7 +2,7 @@
 const express = require('express');
 const { OpenAI } = require('openai');
 const router = express.Router();
-
+const getDB = require('../config/db');
 // 1. 初始化 OpenAI 客户端，劫持 Base URL 指向 DeepSeek
 const openai = new OpenAI({
   baseURL: 'https://api.deepseek.com/v1', // DeepSeek 完全兼容 OpenAI 的接口规范
@@ -56,6 +56,59 @@ router.post('/completions', async (req, res) => {
     // 发生错误时也要遵循 SSE 格式告诉前端
     res.write(`data: ${JSON.stringify({ error: 'AI 服务网络繁忙，请稍后再试' })}\n\n`);
     res.end();
+  }
+});
+// 🚀 新增：获取当前用户的所有历史会话
+router.get('/sessions', async (req, res) => {
+  try {
+    // req.user.userId 是我们之前在 authMiddleware 中解析出来的
+    const userId = req.user.userId;
+    const db = await getDB();
+    
+    // 按更新时间倒序查询
+    const rows = await db.all(
+      'SELECT * FROM chat_sessions WHERE user_id = ? ORDER BY updated_at DESC',
+      [userId]
+    );
+
+    // 将查出来的 JSON 字符串还原成前端认识的数组结构
+    const formattedSessions = rows.map(row => ({
+      id: row.id,
+      title: row.title,
+      updatedAt: row.updated_at,
+      messages: JSON.parse(row.messages)
+    }));
+
+    res.json({ code: 200, message: 'success', data: formattedSessions });
+  } catch (error) {
+    console.error('查询历史记录失败:', error);
+    res.status(500).json({ code: 500, message: '获取历史记录失败' });
+  }
+});
+
+// 🚀 新增：保存或更新单个会话
+router.post('/sessions', async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { id, title, messages, updatedAt } = req.body;
+
+    if (!id || !messages) {
+      return res.status(400).json({ code: 400, message: '参数不完整' });
+    }
+
+    const db = await getDB();
+    
+    // 使用 SQLite 的 INSERT OR REPLACE 语法实现“有则更新，无则插入” (Upsert)
+    await db.run(
+      `INSERT OR REPLACE INTO chat_sessions (id, user_id, title, messages, updated_at) 
+       VALUES (?, ?, ?, ?, ?)`,
+      [id, userId, title || '新对话', JSON.stringify(messages), updatedAt || Date.now()]
+    );
+
+    res.json({ code: 200, message: '同步成功' });
+  } catch (error) {
+    console.error('保存历史记录失败:', error);
+    res.status(500).json({ code: 500, message: '保存记录失败' });
   }
 });
 
