@@ -111,5 +111,24 @@ router.post('/sessions', async (req, res) => {
     res.status(500).json({ code: 500, message: '保存记录失败' });
   }
 });
+router.delete('/sessions/:id', async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const sessionId = req.params.id; // 从 URL 路径中提取要删除的对话 ID
+    
+    const db = await getDB();
+    
+    // 执行 SQL 删除：必须同时匹配 id 和 user_id，防止越权删除别人的对话
+    await db.run(
+      'DELETE FROM chat_sessions WHERE id = ? AND user_id = ?',
+      [sessionId, userId]
+    );
+
+    res.json({ code: 200, message: '删除成功' });
+  } catch (error) {
+    console.error('删除历史记录失败:', error);
+    res.status(500).json({ code: 500, message: '删除记录失败' });
+  }
+});
 
 module.exports = router;
