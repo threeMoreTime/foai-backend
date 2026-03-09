@@ -35,7 +35,7 @@ router.post('/completions', async (req, res) => {
     // 4. 异常监听：如果前端用户突然关闭页面或切换对话，立刻中止请求，节省服务器开销
     req.on('close', () => {
       console.log('⚠️ 客户端已断开连接，主动终止大模型请求');
-      stream.controller.abort(); 
+      stream.controller.abort();
     });
 
     // 5. 将大模型吐出来的碎片 (chunk) 实时管道化推给前端
@@ -61,31 +61,83 @@ router.post('/completions', async (req, res) => {
 // 🚀 新增：获取当前用户的所有历史会话
 router.get('/sessions', async (req, res) => {
   try {
-    // req.user.userId 是我们之前在 authMiddleware 中解析出来的
     const userId = req.user.userId;
     const db = await getDB();
-    
-    // 按更新时间倒序查询
-    const rows = await db.all(
-      'SELECT * FROM chat_sessions WHERE user_id = ? ORDER BY updated_at DESC',
-      [userId]
-    );
+    const rows = await db.all('SELECT * FROM chat_sessions WHERE user_id = ? ORDER BY updated_at DESC', [userId]);
 
-    // 将查出来的 JSON 字符串还原成前端认识的数组结构
     const formattedSessions = rows.map(row => ({
       id: row.id,
       title: row.title,
       updatedAt: row.updated_at,
+      isPinned: Boolean(row.is_pinned), // 🚀 关键：转为前端认识的布尔值
       messages: JSON.parse(row.messages)
     }));
-
     res.json({ code: 200, message: 'success', data: formattedSessions });
   } catch (error) {
-    console.error('查询历史记录失败:', error);
     res.status(500).json({ code: 500, message: '获取历史记录失败' });
   }
 });
 
+router.post('/sessions', async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { id, title, messages, updatedAt } = req.body;
+    const db = await getDB();
+
+    // 🚀 核心修复：先查询是否存在，如果是更新操作，绝不触碰 is_pinned 字段
+    const existing = await db.get('SELECT id FROM chat_sessions WHERE id = ? AND user_id = ?', [id, userId]);
+
+    if (existing) {
+      await db.run(
+        'UPDATE chat_sessions SET title = ?, messages = ?, updated_at = ? WHERE id = ? AND user_id = ?',
+        [title || '新对话', JSON.stringify(messages), updatedAt || Date.now(), id, userId]
+      );
+    } else {
+      await db.run(
+        'INSERT INTO chat_sessions (id, user_id, title, messages, updated_at, is_pinned) VALUES (?, ?, ?, ?, ?, 0)',
+        [id, userId, title || '新对话', JSON.stringify(messages), updatedAt || Date.now()]
+      );
+    }
+    res.json({ code: 200, message: '同步成功' });
+  } catch (error) {
+    res.status(500).json({ code: 500, message: '保存记录失败' });
+  }
+});
+router.put('/sessions/:id', async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const sessionId = req.params.id;
+    const { title, isPinned } = req.body; // 两个参数可选传
+    const db = await getDB();
+
+    const updates = [];
+    const params = [];
+
+    if (title !== undefined) {
+      updates.push('title = ?');
+      params.push(title);
+    }
+    if (isPinned !== undefined) {
+      updates.push('is_pinned = ?');
+      params.push(isPinned ? 1 : 0);
+      // 如果是取消置顶，将更新时间设为当前时间，让它按最新时间排序
+      if (isPinned === false) {
+        updates.push('updated_at = ?');
+        params.push(Date.now());
+      }
+    }
+
+    if (updates.length === 0) return res.status(400).json({ code: 400, message: '无更新字段' });
+
+    params.push(sessionId, userId);
+    const result = await db.run(`UPDATE chat_sessions SET ${updates.join(', ')} WHERE id = ? AND user_id = ?`, params);
+
+    if (result.changes === 0) return res.status(404).json({ code: 404, message: '对话不存在' });
+    res.json({ code: 200, message: '更新成功' });
+  } catch (error) {
+    res.status(500).json({ code: 500, message: '更新失败' });
+  }
+});
 // 🚀 新增：保存或更新单个会话
 router.post('/sessions', async (req, res) => {
   try {
@@ -97,7 +149,7 @@ router.post('/sessions', async (req, res) => {
     }
 
     const db = await getDB();
-    
+
     // 使用 SQLite 的 INSERT OR REPLACE 语法实现“有则更新，无则插入” (Upsert)
     await db.run(
       `INSERT OR REPLACE INTO chat_sessions (id, user_id, title, messages, updated_at) 
@@ -115,9 +167,9 @@ router.delete('/sessions/:id', async (req, res) => {
   try {
     const userId = req.user.userId;
     const sessionId = req.params.id; // 从 URL 路径中提取要删除的对话 ID
-    
+
     const db = await getDB();
-    
+
     // 执行 SQL 删除：必须同时匹配 id 和 user_id，防止越权删除别人的对话
     await db.run(
       'DELETE FROM chat_sessions WHERE id = ? AND user_id = ?',
