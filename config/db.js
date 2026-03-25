@@ -13,7 +13,12 @@ const getDB = async () => {
       driver: sqlite3.Database
     });
 
-    // 1. 创建表（新增了 is_pinned INTEGER DEFAULT 0）
+    // 🚀 开启高性能 WAL (Write-Ahead Logging) 模式
+    // 支持并发读写，防止多用户同时操作时数据库锁定 (SQLITE_BUSY)
+    await dbInstance.exec('PRAGMA journal_mode = WAL');
+
+    // 1. 创建表
+    // 聊天会话表
     await dbInstance.exec(`
       CREATE TABLE IF NOT EXISTS chat_sessions (
         id TEXT PRIMARY KEY,
@@ -25,15 +30,36 @@ const getDB = async () => {
       )
     `);
 
-    // 2. 🚀 无损升级老数据表：尝试为旧表添加 is_pinned 字段
+    // 用户表
+    await dbInstance.exec(`
+      CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        username TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      )
+    `);
+
+    // 2. 🚀 数据库升级与数据迁移
     try {
+      // 升级会话表增加字段
       await dbInstance.exec('ALTER TABLE chat_sessions ADD COLUMN is_pinned INTEGER DEFAULT 0');
-      console.log('🔄 数据库表结构已自动升级：新增 is_pinned 字段');
-    } catch (e) {
-      // 如果报错，说明字段已经存在，静默忽略即可
+    } catch (e) {}
+
+    // 3. 迁移并保留原有的 admin 用户 (如果不存在)
+    const adminUser = await dbInstance.get('SELECT * FROM users WHERE username = ?', ['admin']);
+    if (!adminUser) {
+      const bcrypt = require('bcryptjs');
+      const salt = await bcrypt.genSalt(10);
+      const hash = await bcrypt.hash('admin123', salt); // 默认原始密码 admin123
+      await dbInstance.run(
+        'INSERT INTO users (id, username, password_hash, created_at) VALUES (?, ?, ?, ?)',
+        ['admin-uuid-static', 'admin', hash, Date.now()]
+      );
+      console.log('✅ 已将原始 admin 用户迁移至数据库（默认密码：admin123）');
     }
     
-    console.log('📦 SQLite 数据库已连接并完成建表检查');
+    console.log('📦 SQLite 数据库已连接并完成表结构初始化');
   }
   return dbInstance;
 };

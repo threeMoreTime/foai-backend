@@ -7,9 +7,19 @@ const chatRouter = require('./routes/chat');
 const uploadRouter = require('./routes/upload'); // 🚀 新增：文件上传路由
 const getDB = require('./config/db');
 const authMiddleware = require('./middlewares/auth');
+const rateLimit = require('express-rate-limit');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// 🚀 配置全局请求限流 (防止多用户并发恶意刷接口)
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 分钟
+  max: 100, // 每个 IP 限制 100 次
+  message: { code: 429, message: '请求过于频繁，请稍后再试' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 // ==========================================
 // 1. 全局中间件 (必须放在最前面，大门安检)
@@ -17,6 +27,7 @@ const PORT = process.env.PORT || 3000;
 app.use(cors({
   origin: process.env.CORS_ORIGIN || '*'
 }));
+app.use(limiter); // 🚀 挂载全局限流
 app.use(express.json()); // 解析 application/json 格式的请求体
 
 // ==========================================

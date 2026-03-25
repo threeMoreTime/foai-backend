@@ -111,21 +111,38 @@ router.post('/sessions', async (req, res) => {
     const { id, title, messages, updatedAt } = req.body;
     const db = await getDB();
 
-    // 🚀 核心修复：先查询是否存在，如果是更新操作，绝不触碰 is_pinned 字段
+    // --- 🚀 动态标题生成逻辑 ---
+    let finalTitle = title;
+    // 如果标题是默认值，或者是空的，尝试从消息中提取
+    if (!finalTitle || finalTitle === '新对话' || finalTitle === 'New Chat') {
+      const firstUserMsg = messages.find(m => m.role === 'user');
+      if (firstUserMsg && firstUserMsg.content) {
+        // 截取前 15 个字符
+        const content = typeof firstUserMsg.content === 'string' 
+          ? firstUserMsg.content 
+          : (Array.isArray(firstUserMsg.content) ? '附件对话' : '');
+          
+        finalTitle = content.substring(0, 15);
+        if (content.length > 15) finalTitle += '...';
+      } else {
+        finalTitle = 'New Chat';
+      }
+    }
+
     const existing = await db.get('SELECT id FROM chat_sessions WHERE id = ? AND user_id = ?', [id, userId]);
 
     if (existing) {
       await db.run(
         'UPDATE chat_sessions SET title = ?, messages = ?, updated_at = ? WHERE id = ? AND user_id = ?',
-        [title || '新对话', JSON.stringify(messages), updatedAt || Date.now(), id, userId]
+        [finalTitle, JSON.stringify(messages), updatedAt || Date.now(), id, userId]
       );
     } else {
       await db.run(
         'INSERT INTO chat_sessions (id, user_id, title, messages, updated_at, is_pinned) VALUES (?, ?, ?, ?, ?, 0)',
-        [id, userId, title || '新对话', JSON.stringify(messages), updatedAt || Date.now()]
+        [id, userId, finalTitle, JSON.stringify(messages), updatedAt || Date.now()]
       );
     }
-    res.json({ code: 200, message: '同步成功' });
+    res.json({ code: 200, message: '同步成功', data: { title: finalTitle } });
   } catch (error) {
     res.status(500).json({ code: 500, message: '保存记录失败' });
   }
