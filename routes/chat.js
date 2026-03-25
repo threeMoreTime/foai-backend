@@ -16,7 +16,8 @@ router.post('/completions', async (req, res) => {
   res.setHeader('Connection', 'keep-alive');
 
   try {
-    const { messages } = req.body;
+    // 支持自定义 model、文件内容注入
+    const { messages, model, fileContent } = req.body;
 
     // 基本参数校验
     if (!messages || !Array.isArray(messages)) {
@@ -24,10 +25,22 @@ router.post('/completions', async (req, res) => {
       return res.end();
     }
 
+    // 🚀 核心：若携带了文件内容，将其作为 system 消息注入上下文最前面
+    const messagesWithContext = fileContent
+      ? [
+          {
+            role: 'system',
+            content: `以下是用户上传的文件内容，请结合这份内容回答用户的问题：\n\n${fileContent}`
+          },
+          ...messages
+        ]
+      : messages;
+
     // 3. 发起流式请求 (stream: true)
     const stream = await openai.chat.completions.create({
-      model: 'deepseek-chat', // 使用 DeepSeek 的通用对话模型
-      messages: messages,
+      // 兜底逻辑：若前端未传，默认使用 deepseek-chat
+      model: model || 'deepseek-chat',
+      messages: messagesWithContext,
       stream: true,
       temperature: 0.7 // 控制回答的创造性，0.7 是通用场景的推荐值
     });
@@ -58,6 +71,20 @@ router.post('/completions', async (req, res) => {
     res.end();
   }
 });
+// 🚀 新增：供给前端模型列表下拉选择器的数据端点
+router.get('/models', async (req, res) => {
+  try {
+    // 采用硬编码白名单数组做轻量返回
+    const availableModels = [
+      { id: 'deepseek-chat', name: 'DeepSeek-V3 (推荐)', type: 'general' },
+      { id: 'deepseek-reasoner', name: 'DeepSeek-R1 (推理增强)', type: 'reasoning' }
+    ];
+    res.json({ code: 200, message: 'success', data: availableModels });
+  } catch (error) {
+    res.status(500).json({ code: 500, message: '获取模型列表失败' });
+  }
+});
+
 // 🚀 新增：获取当前用户的所有历史会话
 router.get('/sessions', async (req, res) => {
   try {
@@ -136,31 +163,6 @@ router.put('/sessions/:id', async (req, res) => {
     res.json({ code: 200, message: '更新成功' });
   } catch (error) {
     res.status(500).json({ code: 500, message: '更新失败' });
-  }
-});
-// 🚀 新增：保存或更新单个会话
-router.post('/sessions', async (req, res) => {
-  try {
-    const userId = req.user.userId;
-    const { id, title, messages, updatedAt } = req.body;
-
-    if (!id || !messages) {
-      return res.status(400).json({ code: 400, message: '参数不完整' });
-    }
-
-    const db = await getDB();
-
-    // 使用 SQLite 的 INSERT OR REPLACE 语法实现“有则更新，无则插入” (Upsert)
-    await db.run(
-      `INSERT OR REPLACE INTO chat_sessions (id, user_id, title, messages, updated_at) 
-       VALUES (?, ?, ?, ?, ?)`,
-      [id, userId, title || '新对话', JSON.stringify(messages), updatedAt || Date.now()]
-    );
-
-    res.json({ code: 200, message: '同步成功' });
-  } catch (error) {
-    console.error('保存历史记录失败:', error);
-    res.status(500).json({ code: 500, message: '保存记录失败' });
   }
 });
 router.delete('/sessions/:id', async (req, res) => {

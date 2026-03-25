@@ -4,6 +4,7 @@ require('dotenv').config(); // 加载 .env 环境变量
 
 const userRouter = require('./routes/user');
 const chatRouter = require('./routes/chat');
+const uploadRouter = require('./routes/upload'); // 🚀 新增：文件上传路由
 const getDB = require('./config/db');
 const authMiddleware = require('./middlewares/auth');
 
@@ -31,6 +32,7 @@ app.use('/api/user', userRouter);
 
 // 受保护路由（必须经过 authMiddleware 验明正身才能访问）
 app.use('/api/chat', authMiddleware, chatRouter);
+app.use('/api/chat', authMiddleware, uploadRouter); // 🚀 新增：文件上传
 
 // ==========================================
 // 3. 全局拦截器 (必须放在所有路由的后面)
