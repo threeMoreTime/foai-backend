@@ -11,7 +11,7 @@ const rateLimit = require('express-rate-limit');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-
+app.set('trust proxy', 1);
 // 🚀 配置全局请求限流 (防止多用户并发恶意刷接口)
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 分钟
