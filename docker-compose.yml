@@ -1,0 +1,34 @@
+services:
+  backend:
+    build: .
+    container_name: foai_backend
+    restart: always
+    volumes:
+      - ./foai_data.sqlite:/app/foai_data.sqlite
+    env_file:
+      - .env
+    expose:
+      - "3000"
+
+  nginx:
+    image: nginx:alpine
+    container_name: foai_nginx
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx:/etc/nginx/conf.d
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - ./certbot/www:/var/www/certbot
+      - ./html:/usr/share/nginx/html
+    depends_on:
+      - backend
+
+  certbot:
+    image: certbot/certbot
+    container_name: foai_certbot
+    volumes:
+      - /etc/letsencrypt:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do sleep 12h & wait $${!}; certbot renew; done;'"

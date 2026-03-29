@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  # 1. Node.js 后端服务
+  backend:
+    build: .
+    container_name: foai_backend
+    restart: always
+    env_file:
+      - .env
+    expose:
+      - "3000"
+
+  # 2. Nginx 反向代理网关
+  nginx:
+    image: nginx:alpine
+    container_name: foai_nginx
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx:/etc/nginx/conf.d         # 挂载 Nginx 配置文件
+      - ./certbot/conf:/etc/letsencrypt  # 挂载 SSL 证书存放目录
+      - ./certbot/www:/var/www/certbot   # 挂载 Let's Encrypt 验证目录
+      - ./html:/usr/share/nginx/html      # 挂载 H5 前端静态资源目录
+    depends_on:
+      - backend
+
+  # 3. Certbot 证书自动续签服务
+  certbot:
+    image: certbot/certbot
+    container_name: foai_certbot
+    volumes:
+      - ./certbot/conf:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do sleep 12h & wait $${!}; certbot renew; done;'"
