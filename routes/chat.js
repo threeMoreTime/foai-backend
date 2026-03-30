@@ -52,11 +52,15 @@ router.post('/completions', async (req, res) => {
     });
 
     // 5. 将大模型吐出来的碎片 (chunk) 实时管道化推给前端
+    // 🚀 核心重构：同时透传 reasoning_content（R1 推理过程）和 content（正文）
     for await (const chunk of stream) {
-      const content = chunk.choices[0]?.delta?.content || '';
-      if (content) {
-        // 严格按照 SSE 规范拼装数据报文并推流
-        res.write(`data: ${JSON.stringify({ content })}\n\n`);
+      const delta = chunk.choices[0]?.delta || {};
+      const content = delta.content || '';
+      const reasoning = delta.reasoning_content || '';
+
+      // 只要有任意一个字段有值，就推流给前端
+      if (content || reasoning) {
+        res.write(`data: ${JSON.stringify({ content, reasoning_content: reasoning })}\n\n`);
       }
     }
 

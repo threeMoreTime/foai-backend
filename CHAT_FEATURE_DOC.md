@@ -11,6 +11,7 @@
 - **长链接对话流管理 (`POST /completions`)**:
   - 监听前端长请求，建立基于 `text/event-stream` 内容类型的长连接响应管道。
   - 流式（`stream: true`）请求远端 AI。
+  - **双流解析引擎 (Dual-Stream)**: 针对 DeepSeek-R1 等具备深度思考能力的模型，同时提取和透传 `reasoning_content`（推理内容）与 `content`（正式回答），保证前端能够实现“思考过程”的实时渲染。
   - **异常拦截（断连优化）**: 借助 `req.on('close')` 实现，当客户端主动关闭页面时，通过 `stream.controller.abort()` 阻断模型持续消耗 Token。
 
 ### 现存接口标准
@@ -19,9 +20,9 @@
 - `POST /completions`: 对话生出引擎，吐出块数据。
 - `POST/PUT/DELETE /sessions`: 本地对话索引的同步持久层封装。
 
-## 2. 演进路线一：增加多模型切换支持
+## 2. 现状与成就二：多模型动态切换引擎
 
-**目标**：满足前端 `<Select Model />` 组件的选项诉求；允许在一次对话的请求粒度去更换驱动的脑体（例如 `deepseek-chat` 或 `deepseek-reasoner`）。
+**目标与实现状态（已完成）**：全面支撑前端 `<Select Model />` 组件的选项诉求；允许在一次对话的请求粒度去灵活更换推理脑体（如 `deepseek-chat` 或 `deepseek-reasoner`，或外部导入的兼容模型）。
 
 ### API 实现方案：
 
@@ -49,9 +50,9 @@
     ```
     变为支持前端通过 JSON `body` 透传 `req.body.model` 并提供默认兜底。
 
-## 3. 演进路线二：输入流前置附件预处理（文件上传支撑）
+## 3. 现状与成就三：输入流前置附件预处理与文件解析
 
-**目标**：响应页面下方的 `+` 回形针添加按钮事件。前台选取文件，服务端负责承载落地、向 AI 透传或作预处理阅读。
+**目标与实现状态（已完成）**：响应页面下方的 `+` 回形针触发，前台选取文件推流，服务端调用强力中间件集群（如 `mammoth`/`pdf-parse`/`tesseract`/`xlsx`）对文档提取文本，向 AI 预注入到系统上下文。
 
 ### 架构侧实现方案建议：
 
@@ -62,3 +63,11 @@
     当请求流发入 `/completions` 时，附加新的 `req.body.attachments[]`。根据 AI 平台的支持力度，将文件进行相应的多模态转译后塞进上下文数组发给大模型的上行链路中。
 3.  **文件引用关系落地**:
     当客户端最后调用 `POST /sessions` 时，确保本地 SQLite `chat_sessions` 表或者单独的文件映射表固化这些附着资源的归属，方便刷新和二次点开读取。
+
+## 4. 后端核心防渗漏设计 (Defensive Design)
+
+在 `upload-avatar` (微信资料补完) 和附件上传链路中，遵循以下最高等级防御标准：
+
+- **C++ 级容错降级 (Sharp Try-Catch)**：所有的静态图片缩放（例如 Avatar 的预裁剪），统一利用 `multer.memoryStorage()` 放入 Buffer 后。通过 `sharp()` 包裹 Try-Catch。一切非法图或者伪装文本篡改格式的恶意 payload 都会被隔离并抛出 400 警告，防止 Node.js 底层崩溃。
+- **跨目录防穿透 (Path Traversal Guard)**：凡是系统尝试按路径覆盖更新物理文件或读取本地磁盘资产时，必须加入强校验防御机制（如 `!avatar.includes('..')` 以及严控 `startsWith('/avatars/')` 等白名单）。
+- **空间黑洞防堆积 (Orphan File Prevention)**：对极高频修改区（如头像编辑），舍弃原有的散列型 UUID 随机命名，转而采用以 `userId` 主键为主键名的硬覆盖绑定式（例如 `avatar-{userId}.png`）。即使由于异常客户端逻辑狂发修改包落库，硬盘空间占用永远恒定 1 份，坚决不成为“孤儿文件垃圾场”。

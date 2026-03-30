@@ -35,8 +35,29 @@ const getDB = async () => {
       )
     `);
 
-    // 🚀 删除了原来的 ALTER TABLE 逻辑，防止重复操作报错
-
+    // 🚀 安全动态升级现存表结构
+    const tableInfo = await dbInstance.all("PRAGMA table_info(users)");
+    const columns = tableInfo.map(col => col.name);
+    
+    if (!columns.includes('openid')) {
+      await dbInstance.exec('ALTER TABLE users ADD COLUMN openid TEXT');
+      // 可选：为 openid 单独建索引以替代 UNIQUE 约束（SQLite 允许分开建索引）
+      await dbInstance.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_openid ON users(openid) WHERE openid IS NOT NULL');
+      console.log('✅ 已补充 openid 字段及索引');
+    }
+    if (!columns.includes('avatar')) {
+      await dbInstance.exec('ALTER TABLE users ADD COLUMN avatar TEXT');
+      console.log('✅ 已补充 avatar 字段');
+    }
+    if (!columns.includes('is_profile_completed')) {
+      await dbInstance.exec('ALTER TABLE users ADD COLUMN is_profile_completed INTEGER DEFAULT 1');
+      console.log('✅ 已补充 is_profile_completed 字段');
+    }
+    // 🚀 独立 nickname 字段：与 username（登录凭据）解耦，避免补录时覆盖登录账号
+    if (!columns.includes('nickname')) {
+      await dbInstance.exec('ALTER TABLE users ADD COLUMN nickname TEXT');
+      console.log('✅ 已补充 nickname 字段');
+    }
     const adminUser = await dbInstance.get('SELECT * FROM users WHERE username = ?', ['admin']);
     if (!adminUser) {
       const bcrypt = require('bcryptjs');
