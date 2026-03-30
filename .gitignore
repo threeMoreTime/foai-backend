@@ -1,5 +1,7 @@
 # 数据库文件
 *.sqlite
+*.sqlite-shm
+*.sqlite-wal
 # 依赖包目录 (绝对不能提交)
 node_modules/
 

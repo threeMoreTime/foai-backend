@@ -30,6 +30,10 @@ app.use(cors({
 app.use(limiter); // 🚀 挂载全局限流
 app.use(express.json()); // 解析 application/json 格式的请求体
 
+// 🚀 新增：对外直接暴露本地固化的头像目录
+const path = require('path');
+app.use('/avatars', express.static(path.join(__dirname, 'public/avatars')));
+
 // ==========================================
 // 2. 挂载路由 (业务逻辑)
 // ==========================================
